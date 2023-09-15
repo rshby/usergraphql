@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	_ "github.com/go-sql-driver/mysql"
 	"log"
 	"os"
 )
@@ -21,6 +22,7 @@ func InitDB() {
 		log.Panic("cant connect database: " + err.Error())
 	}
 
+	log.Println("success connect to database")
 	Db = db
 }
 
@@ -29,5 +31,7 @@ func CloseDB() error {
 }
 
 func Migrate() {
-
+	if err := Db.Ping(); err != nil {
+		log.Panic(err)
+	}
 }

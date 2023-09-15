@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	database "usergraphql/db"
 	"usergraphql/graph"
 
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -25,6 +26,9 @@ func main() {
 	if port == "" {
 		port = defaultPort
 	}
+
+	database.InitDB()
+	defer database.CloseDB()
 
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{}}))
 
