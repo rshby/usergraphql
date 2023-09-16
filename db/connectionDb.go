@@ -12,7 +12,7 @@ var Db *sql.DB
 
 func InitDB() {
 	dbUser := os.Getenv("DB_USER")
-	dbHost := os.Getenv("DB_USER")
+	dbHost := os.Getenv("DB_HOST")
 	dbPort := os.Getenv("DB_PORT")
 	dbName := os.Getenv("DB_NAME")
 

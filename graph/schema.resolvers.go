@@ -6,60 +6,176 @@ package graph
 
 import (
 	"context"
-	"fmt"
-	"usergraphql/graph/model"
+	"errors"
+	"github.com/golang-jwt/jwt/v5"
+	"log"
+	"os"
+	"strconv"
+	"usergraphql/app/helper"
+	"usergraphql/app/link"
+	"usergraphql/app/user"
+	database "usergraphql/db"
+	"usergraphql/graph/entity"
 )
 
 // CreateLink is the resolver for the createLink field.
-func (r *mutationResolver) CreateLink(ctx context.Context, input model.NewLink) (*model.Link, error) {
-	link := &model.Link{
+func (r *mutationResolver) CreateLink(ctx context.Context, input entity.NewLink) (*entity.Link, error) {
+	// create entity
+	link := &link.Link{
 		Address: input.Address,
 		Title:   input.Title,
-		User: &model.User{
-			Name: "reo sahobby",
-		},
 	}
 
-	return link, nil
+	// call method in
+	idInserted := r.LinkRepo.Save(ctx, link)
+	return &entity.Link{
+		ID:      strconv.Itoa(int(idInserted)),
+		Title:   input.Title,
+		Address: input.Address,
+	}, nil
 }
 
 // CreateUser is the resolver for the createUser field.
-func (r *mutationResolver) CreateUser(ctx context.Context, input model.NewUser) (string, error) {
-	panic(fmt.Errorf("not implemented: CreateUser - createUser"))
+func (r *mutationResolver) CreateUser(ctx context.Context, input entity.NewUser) (string, error) {
+	// generate hashed password
+	hashedPassword, err := r.AuthHelper.GetHashedPassword(input.Password)
+	if err != nil {
+		log.Println("error hash password : " + err.Error())
+		return "", err
+	}
+
+	// create entity
+	user := &user.User{
+		Username: input.Username,
+		Password: hashedPassword,
+	}
+
+	// call method insert in repository
+	_, err = r.UserRepo.Insert(ctx, user)
+	if err != nil {
+		log.Println("error insert : " + err.Error())
+		return "", err
+	}
+
+	return "success insert user", nil
 }
 
 // Login is the resolver for the login field.
-func (r *mutationResolver) Login(ctx context.Context, input model.Login) (string, error) {
-	panic(fmt.Errorf("not implemented: Login - login"))
+func (r *mutationResolver) Login(ctx context.Context, input entity.Login) (string, error) {
+	// cek data by username
+	user, err := r.UserRepo.GetByUsername(ctx, input.Username)
+	if err != nil {
+		return "", err
+	}
+
+	// compare password
+	_, err = r.AuthHelper.CekPassword(user.Password, input.Password)
+	if err != nil {
+		return "", errors.New("password not match")
+	}
+
+	// call method generate token
+	token, err := r.AuthHelper.GenerateToken(user)
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
 }
 
 // RefreshToken is the resolver for the refreshToken field.
-func (r *mutationResolver) RefreshToken(ctx context.Context, input model.RefreshTokenInput) (string, error) {
-	panic(fmt.Errorf("not implemented: RefreshToken - refreshToken"))
+func (r *mutationResolver) RefreshToken(ctx context.Context, input entity.RefreshTokenInput) (string, error) {
+	// parse to get username
+	claims := jwt.MapClaims{}
+
+	secretKey := os.Getenv("SECRET_KEY")
+	token, _ := jwt.ParseWithClaims(input.Token, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(secretKey), nil
+	})
+
+	if _, ok := token.Claims.(jwt.MapClaims); !ok {
+		return "", errors.New("error when decode token")
+	}
+
+	// create input to generate token
+	user := &user.User{
+		Username: claims["username"].(string),
+	}
+
+	// regenerate token
+	newToken, err := r.AuthHelper.GenerateToken(user)
+	if err != nil {
+		return "", err
+	}
+
+	return newToken, nil
 }
 
 // Links is the resolver for the links field.
-func (r *queryResolver) Links(ctx context.Context) ([]*model.Link, error) {
-	var links []*model.Link
-	dummyLink := &model.Link{
-		ID:      "1",
-		Title:   "our dummy links",
-		Address: "https://localhost:5001/api/v1/lectures",
-		User: &model.User{
-			ID:   "1",
-			Name: "Reo",
-		},
+func (r *queryResolver) Links(ctx context.Context) ([]*entity.Link, error) {
+	links, err := r.LinkRepo.GetAll(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	links = append(links, dummyLink)
-	return links, nil
+	var response []*entity.Link
+	for _, row := range links {
+		response = append(response, &entity.Link{
+			ID:      row.Id,
+			Title:   row.Title,
+			Address: row.Address,
+		})
+	}
+
+	return response, nil
+}
+
+// Users is the resolver for the users field.
+func (r *queryResolver) Users(ctx context.Context) ([]*entity.User, error) {
+	// call method to get data
+	users, err := r.UserRepo.GetAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var response []*entity.User
+	for _, item := range users {
+		response = append(response, &entity.User{
+			ID:   item.Id,
+			Name: item.Username,
+		})
+	}
+
+	return response, nil
 }
 
 // Mutation returns MutationResolver implementation.
-func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
+func (r *Resolver) Mutation() MutationResolver {
+	return &mutationResolver{
+		Resolver:   r,
+		AuthHelper: &helper.AuthHelper{},
+		LinkRepo:   link.NewLinkRepository(database.Db),
+		UserRepo:   &user.UserRepository{database.Db},
+	}
+}
 
 // Query returns QueryResolver implementation.
-func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
+func (r *Resolver) Query() QueryResolver {
+	return &queryResolver{
+		Resolver: r,
+		LinkRepo: link.NewLinkRepository(database.Db),
+		UserRepo: &user.UserRepository{database.Db},
+	}
+}
 
-type mutationResolver struct{ *Resolver }
-type queryResolver struct{ *Resolver }
+type mutationResolver struct {
+	Resolver   *Resolver
+	AuthHelper *helper.AuthHelper
+	LinkRepo   *link.LinkRepository
+	UserRepo   *user.UserRepository
+}
+type queryResolver struct {
+	Resolver *Resolver
+	LinkRepo *link.LinkRepository
+	UserRepo *user.UserRepository
+}
