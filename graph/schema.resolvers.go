@@ -11,6 +11,8 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"sync"
+	"time"
 	"usergraphql/app/helper"
 	"usergraphql/app/link"
 	"usergraphql/app/user"
@@ -119,34 +121,69 @@ func (r *queryResolver) Links(ctx context.Context) ([]*entity.Link, error) {
 	}
 
 	var response []*entity.Link
+	wg := &sync.WaitGroup{}
+	mtx := &sync.Mutex{}
 	for _, row := range links {
-		response = append(response, &entity.Link{
-			ID:      row.Id,
-			Title:   row.Title,
-			Address: row.Address,
-		})
+		wg.Add(1)
+		go func(data link.Link) {
+			defer wg.Done()
+			mtx.Lock()
+			defer mtx.Unlock()
+			response = append(response, &entity.Link{
+				ID:      data.Id,
+				Title:   data.Title,
+				Address: data.Address,
+			})
+		}(row)
 	}
 
+	wg.Wait()
 	return response, nil
 }
 
 // Users is the resolver for the users field.
 func (r *queryResolver) Users(ctx context.Context) ([]*entity.User, error) {
+	ctxTimeout, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+
 	// call method to get data
-	users, err := r.UserRepo.GetAll(ctx)
-	if err != nil {
-		return nil, err
-	}
+	chanUser := make(chan []user.User)
+	var err error
 
-	var response []*entity.User
-	for _, item := range users {
-		response = append(response, &entity.User{
-			ID:   item.Id,
-			Name: item.Username,
-		})
-	}
+	go func(chanUser chan []user.User) {
+		_, err = r.UserRepo.GetAll(ctxTimeout, chanUser)
+	}(chanUser)
 
-	return response, nil
+	for {
+		select {
+		case <-ctxTimeout.Done():
+			return nil, errors.New("timeout")
+		case users := <-chanUser:
+			defer close(chanUser)
+			if err != nil {
+				return nil, err
+			}
+
+			var response []*entity.User
+			wg := &sync.WaitGroup{}
+			mtx := &sync.Mutex{}
+			for _, item := range users {
+				wg.Add(1)
+				go func(data user.User) {
+					defer wg.Done()
+					mtx.Lock()
+					defer mtx.Unlock()
+					response = append(response, &entity.User{
+						ID:   data.Id,
+						Name: data.Username,
+					})
+				}(item)
+			}
+
+			wg.Wait()
+			return response, nil
+		}
+	}
 }
 
 // Mutation returns MutationResolver implementation.

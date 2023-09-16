@@ -70,9 +70,10 @@ func (u *UserRepository) GetByUsername(ctx context.Context, username string) (*U
 }
 
 // method get all users
-func (u *UserRepository) GetAll(ctx context.Context) ([]User, error) {
+func (u *UserRepository) GetAll(ctx context.Context, chanUser chan []User) ([]User, error) {
 	stmt, err := database.Db.PrepareContext(ctx, "SELECT ID, Username, Password from users")
 	if err != nil {
+		close(chanUser)
 		return nil, err
 	}
 	defer stmt.Close()
@@ -80,6 +81,7 @@ func (u *UserRepository) GetAll(ctx context.Context) ([]User, error) {
 	var users []User
 	rows, err := stmt.QueryContext(ctx)
 	if err != nil {
+		close(chanUser)
 		return nil, err
 	}
 	defer rows.Close()
@@ -87,14 +89,17 @@ func (u *UserRepository) GetAll(ctx context.Context) ([]User, error) {
 	for rows.Next() {
 		var user User
 		if err := rows.Scan(&user.Id, &user.Username, &user.Password); err != nil {
+			close(chanUser)
 			return nil, err
 		}
 		users = append(users, user)
 	}
 
 	if len(users) == 0 {
+		close(chanUser)
 		return nil, errors.New("record users not found")
 	}
 
+	chanUser <- users
 	return users, nil
 }
