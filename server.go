@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"usergraphql/app/middleware"
 	database "usergraphql/db"
 	"usergraphql/graph"
 
@@ -36,7 +37,7 @@ func main() {
 
 	chi := chi.NewRouter()
 
-	//chi.Use(middleware.AuthMiddleware())
+	chi.Use(middleware.AuthMiddleware())
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: &graph.Resolver{}}))
 
 	chi.Handle("/", playground.Handler("GraphQL playground", "/graphql"))

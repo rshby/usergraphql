@@ -3,6 +3,7 @@ package middleware
 import (
 	"encoding/json"
 	"github.com/golang-jwt/jwt/v5"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -23,24 +24,31 @@ func AuthMiddleware() func(handler http.Handler) http.Handler {
 			tokenHeader := strings.Split(header, " ")
 			tokenString := tokenHeader[len(tokenHeader)-1]
 
-			_, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-				return []byte(os.Getenv("SECRET_KEY")), nil
+			log.Println("middleware : token string :", tokenString)
+
+			claims := jwt.MapClaims{}
+			secretKey := os.Getenv("SECRET_KEY")
+			log.Println(secretKey)
+			token, _ := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+				return []byte(secretKey), nil
 			})
 
-			if err != nil {
+			if _, ok := token.Claims.(jwt.MapClaims); !ok {
 				w.WriteHeader(http.StatusOK)
 
 				response := map[string]any{
 					"errors": &dto.ApiResponse[string]{
 						StatusCode: http.StatusOK,
 						Status:     "unauthorized",
-						Message:    err.Error(),
+						Message:    "token not valid",
 					},
 				}
 				responseJwt, _ := json.Marshal(&response)
 				w.Write(responseJwt)
 				return
 			}
+
+			log.Println("middleware : masuk ini")
 
 			// success
 			next.ServeHTTP(w, r)
