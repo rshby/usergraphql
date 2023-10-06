@@ -123,6 +123,7 @@ func (r *queryResolver) Links(ctx context.Context) ([]*entity.Link, error) {
 	var response []*entity.Link
 	wg := &sync.WaitGroup{}
 	mtx := &sync.Mutex{}
+
 	for _, row := range links {
 		wg.Add(1)
 		go func(data link.Link) {
